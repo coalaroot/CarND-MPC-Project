@@ -263,7 +263,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   res.push_back(solution.x[throttle_start]);
 
   // Data for mpc_x/y_vals
-  for (unsigned int i = 0; i < N-1; i++) {
+  for (unsigned int i = 0; i < N - 1; i++) {
     res.push_back(solution.x[x_start + i + 1]);
     res.push_back(solution.x[y_start + i + 1]);
   }
