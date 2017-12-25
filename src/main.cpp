@@ -12,6 +12,9 @@
 // for convenience
 using json = nlohmann::json;
 
+const double Latency = 0.1;
+const double Lf = 2.67;
+
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
@@ -44,8 +47,7 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -77,7 +79,7 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -91,6 +93,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double angle = j[1]["steering_angle"];
+          double throttle = j[1]["throttle"];
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -98,13 +102,41 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+          auto n_points = ptsx.size();
+          Eigen::VectorXd ptsx_map = Eigen::VectorXd(n_points);
+          Eigen::VectorXd ptsy_map = Eigen::VectorXd(n_points);
+
+          // points transofmation
+          for (unsigned int i = 0; i < ptsx.size(); i++) {
+            double dx = ptsx[i] - px;
+            double dy = ptsy[i] - py;
+            ptsx_map(i) = dx * cos(-psi) - dy * sin(-psi);
+            ptsy_map(i) = dx * sin(-psi) + dy * cos(-psi);
+          }
+
+          auto coeffs = polyfit(ptsx_map, ptsy_map, 3);
+
+          double steer_value = j[1]["steering_angle"];
+          double throttle_value = j[1]["throttle"];
+
+          // Adding Latency here
+          Eigen::VectorXd state(6);
+          state << v * Latency, 
+                  0, 
+                  -v * angle * Latency / Lf, 
+                  v + (throttle * Latency), 
+                  coeffs[0] + (v * sin(-atan(coeffs[1])) * Latency),
+                  -atan(coeffs[1]) - (v * atan(coeffs[1]) * Latency / Lf);
+
+          auto vars = mpc.Solve(state, coeffs);
+          steer_value = vars[0];
+          throttle_value = vars[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/(deg2rad(25));
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
@@ -113,6 +145,14 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
+
+          for (unsigned int i = 2; i < vars.size(); i++) {
+            if (i % 2 == 0) {
+              mpc_x_vals.push_back(vars[i]);
+            } else {
+              mpc_y_vals.push_back(vars[i]);
+            }
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
@@ -123,19 +163,24 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
+          int num_next_steps = 100;
+          for (int i = 0; i < num_next_steps; i += 3) {
+            next_x_vals.push_back(i);
+            next_y_vals.push_back(polyeval(coeffs, i));
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          //std::cout << msg << std::endl;
+          
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
           //
           // Feel free to play around with this value but should be to drive
-          // around the track with 100ms latency.
+          // around the track with 100ms Latency.
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
@@ -153,8 +198,7 @@ int main() {
   // We don't need this since we're not using HTTP but if it's removed the
   // program
   // doesn't compile :-(
-  h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data,
-                     size_t, size_t) {
+  h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data, size_t, size_t) {
     const std::string s = "<h1>Hello world!</h1>";
     if (req.getUrl().valueLength == 1) {
       res->end(s.data(), s.length());
@@ -168,8 +212,7 @@ int main() {
     std::cout << "Connected!!!" << std::endl;
   });
 
-  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
-                         char *message, size_t length) {
+  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code, char *message, size_t length) {
     ws.close();
     std::cout << "Disconnected" << std::endl;
   });
