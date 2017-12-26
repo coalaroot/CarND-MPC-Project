@@ -61,9 +61,9 @@ class FG_eval {
 
     // Cost for angle & throttle
     for (unsigned int i = 0; i < N - 1; i++) {
-      fg[0] += 15000*CppAD::pow(vars[angle_start + i], 2);
-      fg[0] += 200*CppAD::pow(vars[throttle_start + i], 2);
-      fg[0] += 700*CppAD::pow(vars[angle_start + i] * vars[v_start+i], 2);
+      fg[0] += 1500*CppAD::pow(vars[angle_start + i], 2);
+      fg[0] += 100*CppAD::pow(vars[throttle_start + i], 2);
+      fg[0] += 100*CppAD::pow(vars[angle_start + i] * vars[v_start+i], 2);
     }
 
     // Smotthing out the change or angle & throttle
